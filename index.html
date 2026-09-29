@@ -104,7 +104,7 @@
             <div class="container1"></div>
             <div class="container3"></div>
             <div class="container2"></div>
-        </div><button id="toggleInputBtn" class="toggle-panel-btn" type="button">&lt;</button><iframe class="preview"></iframe>
+        </div><button id="toggleInputBtn" class="toggle-panel-btn" type="button">&lt;</button><iframe class="preview" sandbox="allow-scripts allow-forms allow-modals allow-popups"></iframe>
     </div>
     <div class="actions">
         <button id="cpBtn1">Copy Shared Link</button>
@@ -113,11 +113,13 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/1.0.11/pako.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.34.0/min/vs/loader.min.js"></script>
     <script>
-        const currentUrl = window.location.href;
-        const splitIndex = window.location.href.indexOf('?');
-        var url = window.location.href.substring(0, splitIndex == -1 ? window.location.href.length : splitIndex);
-        const _url = new URL(currentUrl);
-        const params = _url.searchParams;
+        var url = window.location.origin + window.location.pathname;
+        // New links keep data after '#' (never sent to the server, so no server URL length limit);
+        // fall back to '?' so old links still work.
+        const hashParams = new URLSearchParams(window.location.hash.slice(1));
+        const hasHashData = ['js', 'css', 'html'].some(k => hashParams.has(k));
+        const params = hasHashData ? hashParams : new URL(window.location.href).searchParams;
+        const hasQueryData = !hasHashData && ['js', 'css', 'html'].some(k => params.has(k));
         let jsValue = '', cssValue = '', htmlValue = '';
         let isExpanded = params.get('expanded') !== '0';
         params.forEach((value, name) => {
@@ -127,14 +129,19 @@
         });
         function encode(str) {
             try {
-                return encodeURIComponent(btoa(pako.deflate(str, { to: 'string' })));
+                // base64url: no chars that need escaping, and no '+' for URLSearchParams to turn into a space
+                return btoa(pako.deflate(str, { to: 'string' }))
+                    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
             } catch (e) {
-                return str;
+                return encodeURIComponent(str);
             }
         }
         function decode(str) {
             try {
-                return pako.inflate((atob(decodeURIComponent(str))), { to: 'string' });
+                // Accepts both base64url (new links) and standard base64 (old links)
+                let b64 = str.replace(/-/g, '+').replace(/_/g, '/');
+                b64 += '='.repeat((4 - b64.length % 4) % 4);
+                return pako.inflate(atob(b64), { to: 'string' });
             } catch (e) {
                 return str;
             }
@@ -158,7 +165,7 @@
             var htmlB64 = encode(editor1.getValue());
             var jsB64 = encode(editor2.getValue());
             var cssB64 = encode(editor3.getValue());
-            return `${url}?js=${jsB64}&css=${cssB64}&html=${htmlB64}${isExpanded ? '' : '&expanded=0'}`;
+            return `${url}#js=${jsB64}&css=${cssB64}&html=${htmlB64}${isExpanded ? '' : '&expanded=0'}`;
         }
         toggleInputBtn.onclick = () => {
             isExpanded = !isExpanded;
@@ -172,7 +179,7 @@
             var editor3 = monaco.editor.create(document.querySelector('.container3'), { language: 'css', theme: 'vs-dark' });
             var onchange = () => {
                 var html = editor1.getValue(); var js = editor2.getValue(); var css = editor3.getValue();
-                iframe.src = 'data:text/html;charset=utf-8,' + encodeURIComponent("<html><style>" + css + "<\/style>" + html + "<script>" + js + "<\/script><\/html>");
+                iframe.srcdoc = "<html><meta charset=\"utf-8\"><style>" + css + "<\/style>" + html + "<script>" + js + "<\/script><\/html>";
             };
             editor1.setValue(htmlValue);
             editor2.setValue(jsValue);
@@ -194,6 +201,10 @@
             window.editor1 = editor1;
             window.editor2 = editor2;
             window.editor3 = editor3;
+            if (hasQueryData) {
+                // Rewrite old '?' links to the new '#' format without reloading
+                history.replaceState(null, '', buildShareUrl());
+            }
             window.addEventListener('resize', () => {
                 layoutEditors();
             });
