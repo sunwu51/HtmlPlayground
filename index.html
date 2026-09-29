@@ -138,8 +138,10 @@
         }
         function decode(str) {
             try {
-                // Accepts both base64url (new links) and standard base64 (old links)
-                let b64 = str.replace(/-/g, '+').replace(/_/g, '/');
+                // Accepts both base64url (new links) and standard base64 (old links).
+                // Old links made by other tools may be percent-encoded twice (e.g. '%253D'),
+                // so undo one extra layer; this is a no-op for plain base64/base64url.
+                let b64 = decodeURIComponent(str).replace(/-/g, '+').replace(/_/g, '/');
                 b64 += '='.repeat((4 - b64.length % 4) % 4);
                 return pako.inflate(atob(b64), { to: 'string' });
             } catch (e) {
